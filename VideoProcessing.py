@@ -78,19 +78,21 @@ def YUVToMP4(yuvPath, size, mp4Path = None, forceDelete = True):
     return mp4Path
 
 # Converts a yuv to mp4 with the specified bitrate
-def YUVToMP4Compress(yuvPath, size, bitrate, mp4Path = None, forceDelete = True):
+def YUVToMP4Compress(yuvPath, size, br, mp4Path = None, forceDelete = True):
     # ffmpeg -s 640x274 -i dancing.640x274.yuv -c:v libx264 -s:v 640x274  mp4360p.mp4
     if mp4Path == None:
-        mp4Path = os.path.splitext(yuvPath)[0]+'.mp4'
+        mp4Path = os.path.splitext(yuvPath)[0]+"_"+ str(br)+'kbps.mp4'
     if forceDelete and os.path.exists(mp4Path):
         os.remove(mp4Path)
     
+    # mp4Path = os.path.splitext(mp4Path)[0]+str(bitrate)+'kbps.mp4'
+
     commandOutputFile = mp4Path + ".txt"
     if os.path.exists(commandOutputFile):
         os.remove(commandOutputFile)
-
+    
     # ffmpeg -s 640x274 -pix_fmt yuv420p -i dancing.640x274.yuv -b:v 96k -vcodec libx264 -pix_fmt yuv420p test96k.mp4
-    cmd = ffmpeg + " -s " + size + " -pix_fmt yuv420p -i " + yuvPath + " -b:v " + str(bitrate) + "k -vcodec libx264 -pix_fmt yuv420p " + mp4Path + " > " + commandOutputFile + " 2>&1"
+    cmd = ffmpeg + " -s " + size + " -pix_fmt yuv420p -i " + yuvPath + " -b:v " + str(br) + "k -vcodec libx264 -pix_fmt yuv420p " + mp4Path + " > " + commandOutputFile + " 2>&1"
     print(cmd)
     output = os.popen(cmd).read()
     return mp4Path
@@ -113,8 +115,8 @@ def Upsample(source, outputPath, targetSize = "1280:548"):
     return outputPath
 
 # Take a yuv file, convert to mp4 at a specified bitrate, upsample, then convert back to yuv
-def AdaptiveBitrateFlow(yuvFile, bitrate, originalSize):
-    mp4Compressed = YUVToMP4Compress(yuvFile,originalSize, bitrate)
+def AdaptiveBitrateFlow(yuvFile, br, originalSize):
+    mp4Compressed = YUVToMP4Compress(yuvFile,originalSize, br)
     mp4CompressedUpsampled = Upsample(mp4Compressed, os.path.splitext(mp4Compressed)[0] +"CompressedUpsampled.mp4")
     transformedYUV = MP4ToYUV(mp4CompressedUpsampled)
     return transformedYUV, mp4CompressedUpsampled, mp4Compressed
@@ -310,25 +312,37 @@ def GetDataPointsForUpsampledFiles():
 
 def main():
     # Generate refernce 720p to compare to all videos
+    Datas = []
     mp4Reference = YUVToMP4(inputFiles["720p"], inputFileSize["720p"])
     print("Reference 720p video created at", mp4Reference)
-    
-    resolution = "360p"
-    yuvFile = inputFiles[resolution]
-    bitrate = bitrateResolutions[resolution][0]
-    originalSize = inputFileSize[resolution]
-    transformedYUV, mp4CompressedUpsampled, mp4Compressed = AdaptiveBitrateFlow(yuvFile,bitrate,originalSize)
+    for resolution in bitrateResolutions:
+        bitrates = bitrateResolutions[resolution]
+        PSNRs = []
+        for bitrate in bitrates:
+            yuvFile = inputFiles[resolution]
+            originalSize = inputFileSize[resolution]
+            print("Transforming", yuvFile, "at bitrate", bitrate, "for size", originalSize)
+            transformedYUV, mp4CompressedUpsampled, mp4Compressed = AdaptiveBitrateFlow(yuvFile,bitrate,originalSize)
 
-    psnr = CompareFilesPSNR(mp4CompressedUpsampled ,mp4Reference)
-    print("PSNR:", psnr)
-    return
+            psnr = CompareFilesPSNR(mp4CompressedUpsampled, mp4Reference)
+            PSNRs.append(psnr)
+            print("PSNR:", psnr)
+
+        x = bitrates
+        y = PSNRs
+        color = None
+        label = resolution + " upsampled"
+        alpha = 1.0
+        Datas.append(PlotData(x,y,color,label,alpha))
+    
+    
     # GenerateRDCurves()
-    Data = GetDataPointsForUpsampledFiles()
+    # Data = GetDataPointsForUpsampledFiles()
     title = "RD Curve, fixed bitrate compression for Upsampled files"
     xLabel ="Bitrate (kbps)"
     yLabel = "PSNR Y (dB)"
 
-    PlotHelper(title, xLabel, yLabel, scatterData = None, plotData = Data, histogramData = None)
+    PlotHelper(title, xLabel, yLabel, scatterData = None, plotData = Datas, histogramData = None)
 
 if __name__ == "__main__":
     main()
